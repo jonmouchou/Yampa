@@ -15,6 +15,7 @@ module FRP.Yampa.Time (
     localTime,          -- :: SF a Time
     time,               -- :: SF a Time,        Other name for localTime.
     timeTransform,      -- :: (DTime -> DTime) -> SF a b -> SF a b
+    timeTransformSF,    -- :: SF a (DTime -> DTime) -> SF a b -> SF a b
 ) where
 
 import Control.Arrow
@@ -52,6 +53,23 @@ timeTransformF transform sf = SF' tf
                  in if dt' <= 0
                           then usrErr "AFRP" "timeTransform" "The time cannot be negative"
                           else (sf'', b)
+
+timeTransformSF :: SF a (DTime -> DTime)
+                -> SF a b
+                -> SF a b
+timeTransformSF transformSF sf = SF tf
+ where tf a = let (transformSFF, _) = (sfTF transformSF) a
+                  (sf', b) = (sfTF sf) a
+                  sf''     = timeTransformSFF transformSFF sf'
+              in (sf'', b)
+
+timeTransformSFF :: SF' a (DTime -> DTime) -> SF' a b -> SF' a b
+timeTransformSFF transformSF sf = SF' tf
+ where tf dt a = let (transformSF', transform) = (sfTF' transformSF) dt a
+                     dt'                           = transform dt
+                     (sf', b)                      = (sfTF' sf) dt' a
+                     sf''                          = timeTransformSFF transformSF' sf'
+                 in (sf'', b)
 
 -- Vim modeline
 -- vim:set tabstop=8 expandtab:
