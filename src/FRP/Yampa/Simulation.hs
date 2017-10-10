@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs, Rank2Types, CPP #-}
-{-# LANGUAGE ScopedTypeVariables    #-}
 -----------------------------------------------------------------------------------------
 -- |
 -- Module      :  FRP.Yampa.Simulation
@@ -202,20 +201,17 @@ react rh (dt, ma') = do
 -- it produces a list of output samples.
 --
 -- This is a simplified, purely-functional version of 'reactimate'.
-embed :: forall a b . SF a b -> (a, [(DTime, Maybe a)]) -> [b]
-embed sf0 (a0, dtas) = b0 : loop a0 sf dtas
+embed :: SF a b -> (a, [(DTime, Maybe a)]) -> [b]
+embed sf0 (a0, dtas) = b0 : embed' a0 sf dtas
   where
-    sf       :: SF' a b
-    b0       :: b
     (sf, b0) = (sfTF sf0) a0
- 
-    loop :: a -> SF' a b -> [(DTime, Maybe a)] -> [b]
-    loop _      _  []                = []
-    loop a_prev sf ((dt, ma) : dtas) = b : (a `seq` b `seq` loop a sf' dtas)
+
+    embed' :: a -> SF' a b -> [(DTime, Maybe a)] -> [b]
+    embed' _      _  []                = []
+    embed' a_prev sf ((dt, ma) : dtas) = b : (a `seq` b `seq` embed' a sf' dtas)
       where
         a        = fromMaybe a_prev ma
         (sf', b) = (sfTF' sf) dt a
-
 
 -- | Synchronous embedding. The embedded signal function is run on the supplied
 -- input and time stream at a given (but variable) ratio >= 0 to the outer
@@ -233,27 +229,26 @@ embed sf0 (a0, dtas) = b0 : loop a0 sf dtas
 -- !!! It's kind of hard to se why, but "frame dropping" was a problem
 -- !!! in the old robot simulator. Try to find an example!
 
-embedSynch :: forall a b . SF a b -> (a, [(DTime, Maybe a)]) -> SF Double b
-embedSynch sf0 (a0, dtas) = SF {sfTF = tf0}
+embedSynch :: SF a b -> (a, [(DTime, Maybe a)]) -> SF Double b
+embedSynch sf0 (a0, dtas) = SF { sfTF = tf0 }
+    where
+        tts       :: [DTime]
+        tts       = scanl (\t (dt, _) -> t + dt) 0 dtas
+
+     -- bbs       :: [b]
+        bbs@(b:_) = embed sf0 (a0, dtas)
+
+     -- tf0       :: Time -> (SF' DTime b, b)
+        tf0 _     = (embedSynch' 0 (zip tts bbs), b)
+
+embedSynch' :: DTime -> [(DTime, b)] -> SF' DTime b
+embedSynch' _       []    = intErr "AFRP" "embedSynch" "Empty list!"
+embedSynch' tp_prev tbtbs = SF' tf -- True
   where
-
-    tts       :: [DTime]
-    tts       = scanl (\t (dt, _) -> t + dt) 0 dtas
-
-    bbs       :: [b]
-    bbs@(b:_) = embed sf0 (a0, dtas)
-
-    tf0       :: Time -> (SF' DTime b, b)
-    tf0 _     = (esAux 0 (zip tts bbs), b)
-
-    esAux :: DTime -> [(DTime, b)] -> SF' DTime b
-    esAux _       []    = intErr "AFRP" "embedSynch" "Empty list!"
-    esAux tp_prev tbtbs = SF' tf -- True
-      where
-        tf dt r | r < 0     = usrErr "AFRP" "embedSynch" "Negative ratio."
-                | otherwise = let tp = tp_prev + dt * r
-                                  (b, tbtbs') = advance tp tbtbs
-                              in (esAux tp tbtbs', b)
+    tf dt r | r < 0     = usrErr "AFRP" "embedSynch" "Negative ratio."
+            | otherwise = let tp = tp_prev + dt * r
+                              (b, tbtbs') = advance tp tbtbs
+                          in (embedSynch' tp tbtbs', b)
 
     -- Advance the time stamped stream to the perceived time tp.
     -- Under the assumption that the perceived time never goes
@@ -276,15 +271,14 @@ deltaEncode dt aas@(_:_) = deltaEncodeBy (==) dt aas
 
 
 -- | 'deltaEncode' parameterized by the equality test.
-deltaEncodeBy :: forall a . 
-                 (a -> a -> Bool) -> DTime -> [a] -> (a, [(DTime, Maybe a)])
+deltaEncodeBy :: (a -> a -> Bool) -> DTime -> [a] -> (a, [(DTime, Maybe a)])
 deltaEncodeBy _  _  []      = usrErr "AFRP" "deltaEncodeBy" "Empty input list."
 deltaEncodeBy eq dt (a0:as) = (a0, zip (repeat dt) (debAux a0 as))
-  where
-    debAux :: a -> [a] -> [Maybe a]
-    debAux _      []                     = []
-    debAux a_prev (a:as) | a `eq` a_prev = Nothing : debAux a as
-                         | otherwise     = Just a  : debAux a as
+    where
+     -- debAux :: a -> [a] -> [Maybe a]
+        debAux _      []                     = []
+        debAux a_prev (a:as) | a `eq` a_prev = Nothing : debAux a as
+                             | otherwise     = Just a  : debAux a as
 
 -- Embedding and missing events.
 -- Suppose a subsystem is super sampled. Then some of the output
