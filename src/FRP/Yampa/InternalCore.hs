@@ -232,6 +232,12 @@ type DTime = Double     -- [s]
 -- function from 'Time' to value.
 data SF a b = SF {sfTF :: a -> Transition a b}
 
+instance Functor (SF a) where
+  fmap f = (>>^ f)
+
+instance Applicative (SF a) where
+  pure    = arr . const
+  f <*> a = (f &&& a) >>^ uncurry ($)
 
 -- Representation of signal function in "running" state.
 --
